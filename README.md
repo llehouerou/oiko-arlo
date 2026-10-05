@@ -53,7 +53,7 @@ in a loop only burns Arlo's rate limit.
 Build an Oiko with this type (Go 1.27 needed):
 
 ```sh
-go run github.com/llehouerou/oiko/cmd/oiko-build@v0.3.0 -with github.com/llehouerou/oiko-arlo@v0.1.0 -o oiko
+go run github.com/llehouerou/oiko/cmd/oiko-build@v0.3.0 -with github.com/llehouerou/oiko-arlo@v0.1.1 -o oiko
 ./oiko -version   # lists the arlo type, with its module and version
 ```
 
@@ -63,7 +63,7 @@ On NixOS, override Oiko's package with this module's version, and pass the secre
 
 ```nix
 services.oiko.package = oiko.packages.${system}.default.override {
-  bridges."github.com/llehouerou/oiko-arlo" = "v0.1.0";
+  bridges."github.com/llehouerou/oiko-arlo" = "v0.1.1";
   vendorHash = "sha256-…"; # the first nix build prints it
 };
 services.oiko.credentials = {

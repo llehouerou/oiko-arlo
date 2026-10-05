@@ -23,8 +23,8 @@ github.com/klauspost/compress v1.19.2 h1:hMRETovs/pu/dVWN7zIT1PGG8t509MwT6bO7XSi
 github.com/klauspost/compress v1.19.2/go.mod h1:cwPg85FWrGar70rWktvGQj8/hthj3wpl0PGDogxkrSQ=
 github.com/llehouerou/go-arlo v0.4.0 h1:DTjYwTvflXoPC9pQc8mWHig7652rvkeoyULfolbp19U=
 github.com/llehouerou/go-arlo v0.4.0/go.mod h1:j8U2ub+vG4wNVtclWLuSWG1uLIml5a/E0yWiwJMHlfg=
-github.com/llehouerou/oiko v0.4.0 h1:g2yvmw/90ifLhaxIyCuR/yxmXK+NEJzJXsdgQRAdRpI=
-github.com/llehouerou/oiko v0.4.0/go.mod h1:uVHRSr4La6L/IbBY1L6tB82/ccxJhmWy8vbwM84JgLs=
+github.com/llehouerou/oiko v0.5.0 h1:DcUrUt6MtdcGFYOo3luL0KH+70kyZ9O81UBi48nZJHc=
+github.com/llehouerou/oiko v0.5.0/go.mod h1:9ACGYkYxyDmvIMW0yq/epf5eO/V9gcHPZxNrOGB+Zzg=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/quic-go/go-ossfuzz-seeds v0.1.0 h1:APacT+iIaNF6fd8AGEiN3bT/Jtkd2jz4v4TzM7MFjy0=

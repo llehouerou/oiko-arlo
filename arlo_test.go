@@ -2,6 +2,7 @@ package oikoarlo
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"slices"
 	"testing"
@@ -38,8 +39,8 @@ func TestHandleFeedsPort(t *testing.T) {
 	if !h.Replayed() {
 		t.Fatal("not replayed once the mode is known")
 	}
-	if got, _ := h.Value("BASE", "arming", "mode"); got != "standby" {
-		t.Errorf("mode = %v, want standby", got)
+	if got, _ := h.Value("BASE", "arming", "mode"); got.Data != "standby" {
+		t.Errorf("mode = %v, want standby", got.Data)
 	}
 
 	for _, e := range []arlo.Event{
@@ -56,7 +57,6 @@ func TestHandleFeedsPort(t *testing.T) {
 	for _, d := range h.Devices() {
 		names = append(names, d.NativeAddress+" "+d.Name+" "+d.Model+" "+d.Vendor)
 	}
-	slices.Sort(names)
 	if want := []string{"BASE House VMB4000 Arlo", "CAM1 Gate VMC4030P Arlo", "CAM2 Veranda VMC4030P Arlo"}; !slices.Equal(names, want) {
 		t.Errorf("devices = %q, want %q", names, want)
 	}
@@ -68,8 +68,8 @@ func TestHandleFeedsPort(t *testing.T) {
 		{"CAM1", "", "battery", 31.0},
 		{"CAM1", "occupancy", "occupancy", true},
 	} {
-		if got, _ := h.Value(c.addr, c.fn, c.capability); got != c.want {
-			t.Errorf("%s/%s/%s = %v, want %v", c.addr, c.fn, c.capability, got, c.want)
+		if got, _ := h.Value(c.addr, c.fn, c.capability); got.Data != c.want {
+			t.Errorf("%s/%s/%s = %v, want %v", c.addr, c.fn, c.capability, got.Data, c.want)
 		}
 	}
 	for addr, want := range map[string]bridge.Availability{"BASE": bridge.Online, "CAM1": bridge.Online, "CAM2": bridge.Offline} {
@@ -79,8 +79,8 @@ func TestHandleFeedsPort(t *testing.T) {
 	}
 
 	// Refused by Oiko before reaching Send, which has no client here.
-	if err := h.Command("BASE", "arming", map[string]any{"mode": "custom"}); err == nil {
-		t.Error("custom mode commanded")
+	if err := h.Command("BASE", "arming", map[string]any{"mode": "custom"}); !errors.Is(err, bridgetest.ErrRefused) {
+		t.Errorf("custom mode commanded: %v, want refused", err)
 	}
 
 	b.handle(arlo.Connection{Up: false})
@@ -89,6 +89,21 @@ func TestHandleFeedsPort(t *testing.T) {
 	}
 	if got := h.Availability("BASE"); got != bridge.Unknown {
 		t.Errorf("BASE offline bridge: %s, want unknown", got)
+	}
+}
+
+// TestOpen opens a valid section, and refuses a misspelt key.
+func TestOpen(t *testing.T) {
+	secret := t.TempDir() + "/secret"
+	if err := os.WriteFile(secret, []byte("pw\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	valid := `{"email": "oiko@example.com", "passwordFile": "` + secret + `", "imapServer": "imap.example.com:993", "imapUser": "oiko@example.com", "imapPasswordFile": "` + secret + `"`
+	if _, err := open(bridgetest.Env(t, "arlo", valid+`}`)); err != nil {
+		t.Errorf("valid section: %v", err)
+	}
+	if _, err := open(bridgetest.Env(t, "arlo", valid+`, "dumpDirectory": "/tmp"}`)); err == nil {
+		t.Error("misspelt key accepted")
 	}
 }
 

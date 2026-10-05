@@ -1,44 +1,23 @@
 package oikoarlo
 
 import (
-	"bytes"
 	"encoding/json"
 	"os"
 	"slices"
 	"testing"
-	"time"
 
 	arlo "github.com/llehouerou/go-arlo"
 
 	"github.com/llehouerou/oiko/bridge"
+	"github.com/llehouerou/oiko/bridge/bridgetest"
 )
-
-// port records what a Bridge hands Oiko.
-type port struct {
-	devices      []bridge.Device
-	online       []bool // each SetOnline, in order
-	availability map[string]bridge.Availability
-	values       map[string]any // the last reading, by address/function/capability
-	replayed     int
-}
-
-func (p *port) SyncDevices(devices []bridge.Device) { p.devices = devices }
-func (p *port) SetOnline(online bool)               { p.online = append(p.online, online) }
-func (p *port) SetAvailability(address string, a bridge.Availability) {
-	p.availability[address] = a
-}
-func (p *port) Report(address string, readings []bridge.Reading, at time.Time) {
-	for _, r := range readings {
-		p.values[address+"/"+r.Function+"/"+r.Capability] = r.Data
-	}
-}
-func (p *port) Replayed() { p.replayed++ }
 
 // TestHandleFeedsPort replays what go-arlo reports on connecting, as observed
 // on a real account, then a motion, a custom mode and the stream going down.
 func TestHandleFeedsPort(t *testing.T) {
-	p := &port{availability: map[string]bridge.Availability{}, values: map[string]any{}}
-	b := &Bridge{port: p}
+	b := &Bridge{}
+	h := bridgetest.New(b)
+	b.port = h.Port()
 	up, down, battery := true, false, 31
 
 	for _, e := range []arlo.Event{
@@ -52,14 +31,14 @@ func TestHandleFeedsPort(t *testing.T) {
 	} {
 		b.handle(e)
 	}
-	if p.replayed != 0 {
+	if h.Replayed() {
 		t.Fatal("replayed before the mode is known")
 	}
 	b.handle(arlo.ModeChanged{LocationID: "loc", LocationName: "Home", Mode: arlo.Standby})
-	if p.replayed == 0 {
+	if !h.Replayed() {
 		t.Fatal("not replayed once the mode is known")
 	}
-	if got := p.values["BASE/arming/mode"]; got != "standby" {
+	if got, _ := h.Value("BASE", "arming", "mode"); got != "standby" {
 		t.Errorf("mode = %v, want standby", got)
 	}
 
@@ -74,30 +53,42 @@ func TestHandleFeedsPort(t *testing.T) {
 	}
 
 	var names []string
-	for _, d := range p.devices {
+	for _, d := range h.Devices() {
 		names = append(names, d.NativeAddress+" "+d.Name+" "+d.Model+" "+d.Vendor)
 	}
+	slices.Sort(names)
 	if want := []string{"BASE House VMB4000 Arlo", "CAM1 Gate VMC4030P Arlo", "CAM2 Veranda VMC4030P Arlo"}; !slices.Equal(names, want) {
 		t.Errorf("devices = %q, want %q", names, want)
 	}
-	for key, want := range map[string]any{
-		"BASE/arming/mode":         "custom", // shown, though no option
-		"CAM1//battery":            31.0,
-		"CAM1/occupancy/occupancy": true,
+	for _, c := range []struct {
+		addr, fn, capability string
+		want                 any
+	}{
+		{"BASE", "arming", "mode", "custom"}, // shown, though no option
+		{"CAM1", "", "battery", 31.0},
+		{"CAM1", "occupancy", "occupancy", true},
 	} {
-		if got := p.values[key]; got != want {
-			t.Errorf("%s = %v, want %v", key, got, want)
+		if got, _ := h.Value(c.addr, c.fn, c.capability); got != c.want {
+			t.Errorf("%s/%s/%s = %v, want %v", c.addr, c.fn, c.capability, got, c.want)
 		}
 	}
 	for addr, want := range map[string]bridge.Availability{"BASE": bridge.Online, "CAM1": bridge.Online, "CAM2": bridge.Offline} {
-		if got := p.availability[addr]; got != want {
+		if got := h.Availability(addr); got != want {
 			t.Errorf("%s: %s, want %s", addr, got, want)
 		}
 	}
 
+	// Refused by Oiko before reaching Send, which has no client here.
+	if err := h.Command("BASE", "arming", map[string]any{"mode": "custom"}); err == nil {
+		t.Error("custom mode commanded")
+	}
+
 	b.handle(arlo.Connection{Up: false})
-	if !slices.Equal(p.online, []bool{true, false}) {
-		t.Errorf("SetOnline calls = %v, want [true false]", p.online)
+	if h.Online() {
+		t.Error("online after the stream went down")
+	}
+	if got := h.Availability("BASE"); got != bridge.Unknown {
+		t.Errorf("BASE offline bridge: %s, want unknown", got)
 	}
 }
 
@@ -154,10 +145,8 @@ func TestManifest(t *testing.T) {
 			t.Errorf("type %s missing from the manifest", typ)
 			continue
 		}
-		d := json.NewDecoder(bytes.NewReader(section.Config))
-		d.DisallowUnknownFields()
 		var c Config
-		if err := d.Decode(&c); err != nil {
+		if err := (bridge.Env{Config: section.Config}).Decode(&c); err != nil {
 			t.Errorf("type %s: example section: %v", typ, err)
 		}
 	}

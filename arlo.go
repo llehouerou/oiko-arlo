@@ -10,10 +10,9 @@ package oikoarlo
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,13 +38,10 @@ type Config struct {
 	DumpDir string `json:"dumpDir"`
 }
 
-// setTimeout is under Oiko's command timeout, so that a failed SetMode fails
-// its Command rather than letting it time out.
-const setTimeout = 10 * time.Second
-
 // Bridge is Oiko's Arlo account.
 type Bridge struct {
 	client *arlo.Client
+	log    *slog.Logger
 	// Only Run's goroutine touches these.
 	port  bridge.Port
 	bases []string // Native Addresses of the base stations: they carry the mode
@@ -55,7 +51,7 @@ type Bridge struct {
 // data directory. It must never be copied (see go-arlo's README).
 func open(env bridge.Env) (bridge.Bridge, error) {
 	var c Config
-	if err := json.Unmarshal(env.Config, &c); err != nil {
+	if err := env.Decode(&c); err != nil {
 		return nil, fmt.Errorf("arlo: %w", err)
 	}
 	if c.Email == "" || c.IMAPServer == "" || c.IMAPUser == "" {
@@ -75,7 +71,8 @@ func open(env bridge.Env) (bridge.Bridge, error) {
 		SessionPath: filepath.Join(env.DataDir, "session.json"),
 		Code:        arlo.IMAPCode(c.IMAPServer, c.IMAPUser, imapPassword),
 		DumpDir:     c.DumpDir,
-	})}, nil
+		Log:         env.Log,
+	}), log: env.Log}, nil
 }
 
 func readSecret(path string) (string, error) {
@@ -92,16 +89,15 @@ func readSecret(path string) (string, error) {
 func (b *Bridge) Run(ctx context.Context, p bridge.Port) {
 	b.port = p
 	if err := b.client.Run(ctx, b.handle); ctx.Err() == nil {
-		log.Printf("arlo: stopped: %v", err)
+		b.log.Error("stopped", "err", err)
 	}
 }
 
-// Send sets the location's mode; the ModeChanged go-arlo then reports
-// confirms the Command. Oiko only lets through the one settable Capability.
-func (b *Bridge) Send(address, function string, values map[string]any, transition time.Duration) error {
+// Send sets the location's mode, until ctx ends with the Command's timeout;
+// the ModeChanged go-arlo then reports confirms the Command. Oiko only lets
+// through the one settable Capability.
+func (b *Bridge) Send(ctx context.Context, address, function string, values map[string]any, transition time.Duration) error {
 	mode, _ := values["mode"].(string)
-	ctx, cancel := context.WithTimeout(context.Background(), setTimeout)
-	defer cancel()
 	return b.client.SetMode(ctx, arlo.Mode(mode))
 }
 

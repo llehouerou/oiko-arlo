@@ -21,8 +21,8 @@ github.com/klauspost/compress v1.19.2 h1:hMRETovs/pu/dVWN7zIT1PGG8t509MwT6bO7XSi
 github.com/klauspost/compress v1.19.2/go.mod h1:cwPg85FWrGar70rWktvGQj8/hthj3wpl0PGDogxkrSQ=
 github.com/llehouerou/go-arlo v0.4.2 h1:9epJjPzXB8eEVMpVn8353q6EEtPW7lS+unoWV2gPaXg=
 github.com/llehouerou/go-arlo v0.4.2/go.mod h1:j8U2ub+vG4wNVtclWLuSWG1uLIml5a/E0yWiwJMHlfg=
-github.com/llehouerou/oiko v0.7.0 h1:R/cU7zaq8QZEXhoLrc8uVzwdwZ7uNyDMW5tLT46Ry+c=
-github.com/llehouerou/oiko v0.7.0/go.mod h1:Msq1UEqT1mHZx+q8AaajTAZF0D7HAQdPbWYYYu8rQOs=
+github.com/llehouerou/oiko v0.8.0 h1:LF4ZSFqQU5U8fm4sNxItOwPFKEx4MMm9vWssRNz6wSw=
+github.com/llehouerou/oiko v0.8.0/go.mod h1:Msq1UEqT1mHZx+q8AaajTAZF0D7HAQdPbWYYYu8rQOs=
 github.com/quic-go/go-ossfuzz-seeds v0.1.0 h1:APacT+iIaNF6fd8AGEiN3bT/Jtkd2jz4v4TzM7MFjy0=
 github.com/quic-go/go-ossfuzz-seeds v0.1.0/go.mod h1:3IOHRbJIc+L6YKMwfDtJAM9Vj9k0YY4muhuyUYk5tbk=
 github.com/quic-go/qpack v0.6.0 h1:g7W+BMYynC1LbYLSqRt8PBg5Tgwxn214ZZR34VIOjz8=

@@ -1,7 +1,8 @@
 // Package oikoarlo is the arlo type of Bridge of Oiko: it connects Oiko to
 // Arlo's cloud through go-arlo (Oiko's ADR 0010). Each base station carries
 // its location's mode, each camera its motion, battery and connection, and
-// its Picture and Live view (bridge.Cameras).
+// its Picture and Live view (bridge.Cameras) and its Recordings
+// (bridge.Recordings).
 //
 // An Oiko built with this module imports it for its side effect, which
 // registers the type:
@@ -20,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	arlo "github.com/llehouerou/go-arlo"
@@ -49,6 +51,9 @@ type Bridge struct {
 	// Only Run's goroutine touches these.
 	port  bridge.Port
 	bases []string // Native Addresses of the base stations: they carry the mode
+
+	mu     sync.Mutex
+	listed map[recordingKey]listedRecording // what Recordings listed, for RecordingMedia
 }
 
 // client is the part of go-arlo's Client the Bridge uses.
@@ -57,6 +62,7 @@ type client interface {
 	SetMode(ctx context.Context, mode arlo.Mode) error
 	LastImages(ctx context.Context, cameraID string) (arlo.LastImages, error)
 	Stream(ctx context.Context, cameraID string) (string, error)
+	Library(ctx context.Context, from, to time.Time) ([]arlo.Recording, error)
 }
 
 // open reads the passwords and returns a Bridge keeping its session in the
@@ -152,14 +158,7 @@ func fetch(ctx context.Context, name, u string) (bridge.Picture, error) {
 	if u == "" {
 		return bridge.Picture{}, fmt.Errorf("%s: none", name)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return bridge.Picture{}, fmt.Errorf("%s: invalid URL", name)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if ue := (*url.Error)(nil); errors.As(err, &ue) {
-		err = ue.Err // url.Error quotes the URL
-	}
+	resp, err := get(ctx, u, nil)
 	if err != nil {
 		return bridge.Picture{}, fmt.Errorf("%s: %w", name, err)
 	}
@@ -176,6 +175,32 @@ func fetch(ctx context.Context, name, u string) (bridge.Picture, error) {
 	}
 	taken, _ := http.ParseTime(resp.Header.Get("Last-Modified"))
 	return bridge.Picture{Data: data, ContentType: "image/jpeg", Taken: taken}, nil
+}
+
+// presigned GETs Arlo's presigned URLs. It bounds the wait for the headers
+// but not the body, which may be a video read for as long as it plays, and
+// leaves the body as S3 sends it.
+var presigned = func() *http.Client {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.ResponseHeaderTimeout = 30 * time.Second
+	t.DisableCompression = true
+	return &http.Client{Transport: t}
+}()
+
+// get GETs the presigned URL u with header; its errors leave u out.
+func get(ctx context.Context, u string, header http.Header) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, errors.New("invalid URL")
+	}
+	if header != nil {
+		req.Header = header.Clone()
+	}
+	resp, err := presigned.Do(req)
+	if ue := (*url.Error)(nil); errors.As(err, &ue) {
+		err = ue.Err // url.Error quotes the URL
+	}
+	return resp, err
 }
 
 // Stream starts a camera's live stream, or joins the one running. Arlo's

@@ -15,8 +15,13 @@ import (
 
 // fakeClient answers the cameras' calls from memory.
 type fakeClient struct {
-	images map[string]arlo.LastImages
-	stream string
+	images  map[string]arlo.LastImages
+	stream  string
+	library func(from, to time.Time) []arlo.Recording
+}
+
+func (f fakeClient) Library(_ context.Context, from, to time.Time) ([]arlo.Recording, error) {
+	return f.library(from, to), nil
 }
 
 func (fakeClient) Run(context.Context, func(arlo.Event)) error { return nil }
@@ -42,12 +47,19 @@ const secret = "X-Amz-Signature=s3cr3t"
 // cameras is a home with the Bridge online, its base BASE and camera CAM1,
 // whose pictures are images.
 func cameras(t *testing.T, images arlo.LastImages) *bridgetest.Home {
-	b := &Bridge{client: fakeClient{images: map[string]arlo.LastImages{"CAM1": images}, stream: "rtsps://192.0.2.1:443/stream?" + secret}}
+	return home(fakeClient{images: map[string]arlo.LastImages{"CAM1": images}})
+}
+
+// home is a home with the Bridge on c online, its base BASE and cameras
+// CAM1 and CAM2.
+func home(c fakeClient) *bridgetest.Home {
+	b := &Bridge{client: c}
 	h := bridgetest.New(b)
 	b.port = h.Port()
 	b.handle(arlo.Devices{
 		{ID: "BASE", Name: "House", Type: "basestation"},
 		{ID: "CAM1", Name: "Gate", Type: "camera", BaseID: "BASE"},
+		{ID: "CAM2", Name: "Veranda", Type: "camera", BaseID: "BASE"},
 	})
 	b.handle(arlo.Connection{Up: true})
 	return h

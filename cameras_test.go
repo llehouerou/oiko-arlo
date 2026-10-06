@@ -59,7 +59,7 @@ func home(c fakeClient) *bridgetest.Home {
 }
 
 func newHome(c fakeClient) (*Bridge, *bridgetest.Home) {
-	b := &Bridge{client: c, log: slog.New(slog.DiscardHandler), ctx: context.Background()}
+	b := &Bridge{client: c, lib: newLibrary(c.Library), log: slog.New(slog.DiscardHandler), ctx: context.Background()}
 	h := bridgetest.New(b)
 	b.port = h.Port()
 	b.handle(arlo.Devices{

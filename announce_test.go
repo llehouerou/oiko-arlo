@@ -1,6 +1,7 @@
 package oikoarlo
 
 import (
+	"slices"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -28,7 +29,7 @@ func (l *lagging) list(from, to time.Time) []arlo.Recording {
 	if time.Now().Before(l.listedAt) {
 		return nil
 	}
-	return l.recs
+	return slices.Clone(l.recs)
 }
 
 func (l *lagging) count() int {
@@ -97,6 +98,24 @@ func TestAnnounceUnlisted(t *testing.T) {
 		}
 		if _, ok := event(t, h, "CAM2"); ok {
 			t.Error("a snapshot announced")
+		}
+	})
+}
+
+// TestAnnounceAgain notices a recording once more, over an hour after its
+// start: it is announced anew.
+func TestAnnounceAgain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := video("CAM1", time.Now().Add(-30*time.Second))
+		l := &lagging{}
+		b, _ := newHome(fakeClient{library: l.list})
+		b.handle(arlo.RecordingAdded{Recording: r})
+		time.Sleep(time.Hour)
+		b.handle(arlo.RecordingAdded{Recording: r})
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		if n := l.count(); n != 6 {
+			t.Errorf("%d Library calls, want 6: two announcements", n)
 		}
 	})
 }

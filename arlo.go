@@ -21,7 +21,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	arlo "github.com/llehouerou/go-arlo"
@@ -47,16 +46,13 @@ type Config struct {
 // Bridge is Oiko's Arlo account.
 type Bridge struct {
 	client client
+	lib    *library
 	log    *slog.Logger
 	// Only Run's goroutine touches these.
 	ctx   context.Context // Run's, which ends the announcements
 	port  bridge.Port
 	bases []string // Native Addresses of the base stations: they carry the mode
 	wasUp bool     // connected before: a reconnection backfills announcements
-
-	mu        sync.Mutex
-	listed    map[recordingKey]listedRecording // what Recordings listed, for RecordingMedia
-	announced map[recordingKey]time.Time       // recordings announced, by their start
 }
 
 // client is the part of go-arlo's Client the Bridge uses.
@@ -65,7 +61,6 @@ type client interface {
 	SetMode(ctx context.Context, mode arlo.Mode) error
 	LastImages(ctx context.Context, cameraID string) (arlo.LastImages, error)
 	Stream(ctx context.Context, cameraID string) (string, error)
-	Library(ctx context.Context, from, to time.Time) ([]arlo.Recording, error)
 }
 
 // open reads the passwords and returns a Bridge keeping its session in the
@@ -86,14 +81,15 @@ func open(env bridge.Env) (bridge.Bridge, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Bridge{client: arlo.New(arlo.Config{
+	ac := arlo.New(arlo.Config{
 		Email:       c.Email,
 		Password:    password,
 		SessionPath: filepath.Join(env.DataDir, "session.json"),
 		Code:        arlo.IMAPCode(c.IMAPServer, c.IMAPUser, imapPassword),
 		DumpDir:     c.DumpDir,
 		Log:         env.Log,
-	}), log: env.Log}, nil
+	})
+	return &Bridge{client: ac, lib: newLibrary(ac.Library), log: env.Log}, nil
 }
 
 func readSecret(path string) (string, error) {
@@ -237,7 +233,7 @@ func (b *Bridge) handle(e arlo.Event) {
 		}
 		b.wasUp = b.wasUp || e.Up
 	case arlo.RecordingAdded:
-		if e.ContentType == "video/mp4" && b.notice(e.Recording) {
+		if e.ContentType == "video/mp4" && b.lib.notice(e.Recording) {
 			go b.announce(b.ctx, e.Recording)
 		}
 	case arlo.Devices:

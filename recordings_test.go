@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	arlo "github.com/llehouerou/go-arlo"
@@ -18,9 +19,9 @@ import (
 	"github.com/llehouerou/oiko/bridge/bridgetest"
 )
 
-// library is a fake of Arlo's library: its entries' URLs point at an S3
+// fakeLibrary is a fake of Arlo's Library: its entries' URLs point at an S3
 // stand-in that refuses a signature other than the latest listing's.
-type library struct {
+type fakeLibrary struct {
 	srv     *httptest.Server
 	base    time.Time // the start of CAM1's first recording in range
 	calls   [][2]time.Time
@@ -29,14 +30,14 @@ type library struct {
 	nextSig string
 }
 
-func (l *library) signature() string {
+func (l *fakeLibrary) signature() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.sig
 }
 
-func newLibrary(t *testing.T) *library {
-	l := &library{base: time.Now().Truncate(time.Hour).Add(-48 * time.Hour), nextSig: "s1"}
+func newFakeLibrary(t *testing.T) *fakeLibrary {
+	l := &fakeLibrary{base: time.Now().Truncate(time.Hour).Add(-48 * time.Hour), nextSig: "s1"}
 	l.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("X-Amz-Signature") != l.signature() {
 			http.Error(w, "expired", http.StatusForbidden)
@@ -50,7 +51,7 @@ func newLibrary(t *testing.T) *library {
 
 // list answers Library: CAM1's three videos and a snapshot in range, one
 // video before it, and CAM2's video.
-func (l *library) list(from, to time.Time) []arlo.Recording {
+func (l *fakeLibrary) list(from, to time.Time) []arlo.Recording {
 	l.calls = append(l.calls, [2]time.Time{from, to})
 	l.mu.Lock()
 	l.sig = l.nextSig
@@ -70,12 +71,12 @@ func (l *library) list(from, to time.Time) []arlo.Recording {
 	}
 }
 
-func (l *library) home() *bridgetest.Home { return home(fakeClient{library: l.list}) }
+func (l *fakeLibrary) home() *bridgetest.Home { return home(fakeClient{library: l.list}) }
 
 // TestRecordings lists CAM1's videos in range, the newest first, from the
 // days around it, and clamps a range from 1970 to Arlo's retention.
 func TestRecordings(t *testing.T) {
-	l := newLibrary(t)
+	l := newFakeLibrary(t)
 	h := l.home()
 	rs, err := h.Recordings("CAM1", "camera", l.base, l.base.Add(2*time.Hour))
 	if err != nil {
@@ -119,7 +120,7 @@ func TestTrigger(t *testing.T) {
 // TestRecordingMedia fetches a listed video's range, its thumbnail, an
 // unlisted one, a refused one, and checks no error quotes a URL.
 func TestRecordingMedia(t *testing.T) {
-	l := newLibrary(t)
+	l := newFakeLibrary(t)
 	h := l.home()
 	rs, err := h.Recordings("CAM1", "camera", l.base, l.base)
 	if err != nil || len(rs) != 1 {
@@ -183,4 +184,51 @@ func TestRecordingMedia(t *testing.T) {
 	} else if strings.Contains(err.Error(), "Signature") || strings.Contains(err.Error(), ".mp4") {
 		t.Errorf("error quotes a URL: %v", err)
 	}
+}
+
+// TestRecordingMediaStale lists a recording's day again once its listing is
+// 20 hours old, without waiting for S3 to refuse its URL.
+func TestRecordingMediaStale(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := video("CAM1", time.Now().Add(-time.Hour))
+		r.URL = "" // never fetched: not found once looked up
+		l := &lagging{recs: []arlo.Recording{r}}
+		h := home(fakeClient{library: l.list})
+		rs, err := h.Recordings("CAM1", "camera", r.Created, r.Created)
+		if err != nil || len(rs) != 1 {
+			t.Fatalf("recordings: %+v, %v", rs, err)
+		}
+		for _, c := range []struct {
+			after time.Duration
+			calls int
+		}{{0, 1}, {21 * time.Hour, 2}} {
+			time.Sleep(c.after)
+			if _, err := h.RecordingMedia("CAM1", "camera", rs[0].ID, bridge.Video, nil); !errors.Is(err, bridge.ErrNotFound) {
+				t.Errorf("after %s: %v, want not found", c.after, err)
+			}
+			if n := l.count(); n != c.calls {
+				t.Errorf("after %s: %d Library calls, want %d", c.after, n, c.calls)
+			}
+		}
+	})
+}
+
+// TestNoticeExpires shows a recording the Library never lists, from its
+// notice, for 20 hours.
+func TestNoticeExpires(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now().Add(-30 * time.Second)
+		b, h := newHome(fakeClient{library: (&lagging{}).list})
+		b.handle(arlo.RecordingAdded{Recording: video("CAM1", start)})
+		for _, c := range []struct {
+			after time.Duration
+			want  int
+		}{{time.Minute, 1}, {20 * time.Hour, 0}} {
+			time.Sleep(c.after)
+			synctest.Wait()
+			if rs, err := h.Recordings("CAM1", "camera", start, start); err != nil || len(rs) != c.want {
+				t.Errorf("after %s: %+v, %v; want %d", c.after, rs, err, c.want)
+			}
+		}
+	})
 }

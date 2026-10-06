@@ -37,8 +37,9 @@ The Bridge's section of Oiko's configuration, under `bridges`:
 ```
 
 - `email`, `passwordFile`: the Arlo account Oiko logs in as. Use a dedicated account the
-  owner of the cameras granted access to, never the owner's. Passwords are read from files,
-  so that they stay out of the configuration.
+  owner of the cameras granted access to, never the owner's. The account must see exactly one
+  Arlo location holding its base stations; otherwise the Bridge never connects. Passwords
+  are read from files, so that they stay out of the configuration.
 - `imapServer` (`host:port`, TLS), `imapUser`, `imapPasswordFile`: the mailbox where
   Arlo sends the account's two-factor codes, by email. The Bridge reads them over IMAP, so
   that logging in needs nobody.
@@ -62,7 +63,7 @@ in a loop only burns Arlo's rate limit.
 Build an Oiko with this type (Go 1.27 needed):
 
 ```sh
-go run github.com/llehouerou/oiko/cmd/oiko-build@v0.9.0 -with github.com/llehouerou/oiko-arlo@v0.6.0 -o oiko
+go run github.com/llehouerou/oiko/cmd/oiko-build@v0.9.2 -with github.com/llehouerou/oiko-arlo@v0.7.0 -o oiko
 ./oiko -version   # lists the arlo type, with its module and version
 ```
 
@@ -72,7 +73,7 @@ On NixOS, override Oiko's package with this module's version, and pass the secre
 
 ```nix
 services.oiko.package = oiko.packages.${system}.default.override {
-  bridges."github.com/llehouerou/oiko-arlo" = "v0.6.0";
+  bridges."github.com/llehouerou/oiko-arlo" = "v0.7.0";
   vendorHash = "sha256-…"; # the first nix build prints it
 };
 services.oiko.credentials = {
@@ -101,5 +102,5 @@ Each version's `go.mod` names the Oiko it needs.
 ```sh
 direnv allow   # or `nix develop`: Go 1.27
 go test ./...
-go run github.com/llehouerou/oiko/cmd/oiko-build@v0.9.0 -with github.com/llehouerou/oiko-arlo=. -o oiko
+go run github.com/llehouerou/oiko/cmd/oiko-build@v0.9.2 -with github.com/llehouerou/oiko-arlo=. -o oiko
 ```

@@ -3,8 +3,8 @@ module github.com/llehouerou/oiko-arlo
 go 1.27.1
 
 require (
-	github.com/llehouerou/go-arlo v0.4.2
-	github.com/llehouerou/oiko v0.8.0
+	github.com/llehouerou/go-arlo v0.5.0
+	github.com/llehouerou/oiko v0.9.0
 )
 
 require (

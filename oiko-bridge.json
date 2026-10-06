@@ -1,7 +1,7 @@
 {
   "types": {
     "arlo": {
-      "description": "Arlo cameras through Arlo's cloud: the Picture, Live view, Recordings (Arlo's library), motion, battery and connection of each camera, and the location's mode (standby, armHome, armAway), which it can set. Two-factor codes are read over IMAP.",
+      "description": "Arlo cameras through Arlo's cloud: the Picture, Live view, Recordings (Arlo's library) and an Event announcing each new one, motion, battery and connection of each camera, and the location's mode (standby, armHome, armAway), which it can set. Two-factor codes are read over IMAP.",
       "config": {
         "email": "oiko@example.com",
         "passwordFile": "/path/to/arlo-password",

@@ -3,6 +3,7 @@ package oikoarlo
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -53,7 +54,12 @@ func cameras(t *testing.T, images arlo.LastImages) *bridgetest.Home {
 // home is a home with the Bridge on c online, its base BASE and cameras
 // CAM1 and CAM2.
 func home(c fakeClient) *bridgetest.Home {
-	b := &Bridge{client: c}
+	_, h := newHome(c)
+	return h
+}
+
+func newHome(c fakeClient) (*Bridge, *bridgetest.Home) {
+	b := &Bridge{client: c, log: slog.New(slog.DiscardHandler), ctx: context.Background()}
 	h := bridgetest.New(b)
 	b.port = h.Port()
 	b.handle(arlo.Devices{
@@ -62,7 +68,7 @@ func home(c fakeClient) *bridgetest.Home {
 		{ID: "CAM2", Name: "Veranda", Type: "camera", BaseID: "BASE"},
 	})
 	b.handle(arlo.Connection{Up: true})
-	return h
+	return b, h
 }
 
 // TestPicture serves an older thumbnail and a newer snapshot, and checks the

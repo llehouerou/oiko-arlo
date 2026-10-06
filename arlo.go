@@ -49,11 +49,14 @@ type Bridge struct {
 	client client
 	log    *slog.Logger
 	// Only Run's goroutine touches these.
+	ctx   context.Context // Run's, which ends the announcements
 	port  bridge.Port
 	bases []string // Native Addresses of the base stations: they carry the mode
+	wasUp bool     // connected before: a reconnection backfills announcements
 
-	mu     sync.Mutex
-	listed map[recordingKey]listedRecording // what Recordings listed, for RecordingMedia
+	mu        sync.Mutex
+	listed    map[recordingKey]listedRecording // what Recordings listed, for RecordingMedia
+	announced map[recordingKey]time.Time       // recordings announced, by their start
 }
 
 // client is the part of go-arlo's Client the Bridge uses.
@@ -105,7 +108,7 @@ func readSecret(path string) (string, error) {
 // cancelled. go-arlo reconnects by itself, sparing Arlo's auth rate limit:
 // never retry around it.
 func (b *Bridge) Run(ctx context.Context, p bridge.Port) {
-	b.port = p
+	b.ctx, b.port = ctx, p
 	if err := b.client.Run(ctx, b.handle); ctx.Err() == nil {
 		b.log.Error("stopped", "err", err)
 	}
@@ -229,6 +232,14 @@ func (b *Bridge) handle(e arlo.Event) {
 	switch e := e.(type) {
 	case arlo.Connection:
 		b.port.SetOnline(e.Up)
+		if e.Up && b.wasUp {
+			go b.backfill(b.ctx)
+		}
+		b.wasUp = b.wasUp || e.Up
+	case arlo.RecordingAdded:
+		if e.ContentType == "video/mp4" && b.notice(e.Recording) {
+			go b.announce(b.ctx, e.Recording)
+		}
 	case arlo.Devices:
 		b.bases = b.bases[:0]
 		devices := make([]bridge.Device, 0, len(e))
@@ -282,7 +293,10 @@ func describe(d arlo.Device) bridge.Device {
 	case "camera":
 		dev.Functions = []bridge.Function{{Key: "occupancy", Kind: "occupancy", Capabilities: []bridge.Capability{{
 			Key: "occupancy", Label: "Occupancy", Type: bridge.Binary, Access: observable, Category: bridge.Primary,
-		}}}, {Key: camera, Kind: camera}}
+		}}}, {Key: camera, Kind: camera, Capabilities: []bridge.Capability{{
+			Key: bridge.RecordingEvent, Label: "Recording", Type: bridge.Enum, Options: triggers,
+			Stateless: true, Access: observable, Category: bridge.Primary,
+		}}}}
 		dev.Capabilities = []bridge.Capability{{
 			Key: "battery", Label: "Battery", Type: bridge.Numeric, Unit: "%",
 			Min: &percent[0], Max: &percent[1], Access: observable, Category: bridge.Diagnostic,

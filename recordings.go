@@ -30,7 +30,8 @@ type recordingKey struct{ camera, id string }
 
 type listedRecording struct {
 	arlo.Recording
-	at time.Time // when listed
+	at      time.Time // when listed
+	noticed bool      // known from its notice only, Library not having listed it
 }
 
 // Recordings lists a camera's videos, from Arlo's library, which lists every
@@ -51,6 +52,14 @@ func (b *Bridge) Recordings(ctx context.Context, address, function string, from,
 	if err != nil {
 		return nil, err
 	}
+	// A recording announced but not listed yet: Oiko looks for it.
+	b.mu.Lock()
+	for _, l := range b.listed {
+		if l.noticed && time.Since(l.at) <= keepListed {
+			recs = append(recs, l.Recording)
+		}
+	}
+	b.mu.Unlock()
 	var out []bridge.Recording
 	for _, r := range recs {
 		if r.CameraID == address && !r.Created.Before(from) && !r.Created.After(to) {
@@ -62,8 +71,8 @@ func (b *Bridge) Recordings(ctx context.Context, address, function string, from,
 }
 
 // RecordingMedia GETs a recording's video or thumbnail with header. Its URL
-// comes from a listing of the last 20 hours, else from listing its day once
-// more, as when S3 refuses an expired URL.
+// comes from a listing or a notice of the last 20 hours, else from listing
+// its day once more, as when S3 refuses an expired URL.
 func (b *Bridge) RecordingMedia(ctx context.Context, address, function, id string, part bridge.RecordingPart, header http.Header) (*http.Response, error) {
 	ms, err := strconv.ParseInt(id, 10, 64)
 	if function != camera || err != nil {
@@ -125,7 +134,7 @@ func (b *Bridge) list(ctx context.Context, from, to time.Time) ([]arlo.Recording
 		}
 	}
 	for _, r := range recs {
-		b.listed[recordingKey{r.CameraID, recordingID(r)}] = listedRecording{r, now}
+		b.listed[recordingKey{r.CameraID, recordingID(r)}] = listedRecording{Recording: r, at: now}
 	}
 	return recs, nil
 }

@@ -7,7 +7,10 @@ added to an Oiko build like any other (Oiko's ADR 0017). It follows Arlo's cloud
 What it follows:
 
 - each camera: its motion, as an `occupancy` Function (like a Zigbee motion sensor), its
-  battery, a diagnostic Capability in %, and whether it is connected (its Availability);
+  battery, a diagnostic Capability in %, whether it is connected (its Availability), and
+  a `camera` Function: Oiko's dashboard shows its Picture, the latest image Arlo keeps
+  (read without waking the camera), and opens its Live view on a tap, capped at 5 minutes
+  since the camera runs on battery;
 - each base station: whether it is connected, and the location's mode, as the `mode`
   Capability of an `arming` Function. Oiko can set it to `standby`, `armHome` or
   `armAway`; a custom mode the owner activates in Arlo's app is shown as `custom`, and
@@ -53,7 +56,7 @@ in a loop only burns Arlo's rate limit.
 Build an Oiko with this type (Go 1.27 needed):
 
 ```sh
-go run github.com/llehouerou/oiko/cmd/oiko-build@v0.5.0 -with github.com/llehouerou/oiko-arlo@v0.3.0 -o oiko
+go run github.com/llehouerou/oiko/cmd/oiko-build@v0.7.0 -with github.com/llehouerou/oiko-arlo@v0.4.0 -o oiko
 ./oiko -version   # lists the arlo type, with its module and version
 ```
 
@@ -63,7 +66,7 @@ On NixOS, override Oiko's package with this module's version, and pass the secre
 
 ```nix
 services.oiko.package = oiko.packages.${system}.default.override {
-  bridges."github.com/llehouerou/oiko-arlo" = "v0.3.0";
+  bridges."github.com/llehouerou/oiko-arlo" = "v0.4.0";
   vendorHash = "sha256-…"; # the first nix build prints it
 };
 services.oiko.credentials = {
@@ -92,5 +95,5 @@ Each version's `go.mod` names the Oiko it needs.
 ```sh
 direnv allow   # or `nix develop`: Go 1.27
 go test ./...
-go run github.com/llehouerou/oiko/cmd/oiko-build@v0.5.0 -with github.com/llehouerou/oiko-arlo=. -o oiko
+go run github.com/llehouerou/oiko/cmd/oiko-build@v0.7.0 -with github.com/llehouerou/oiko-arlo=. -o oiko
 ```

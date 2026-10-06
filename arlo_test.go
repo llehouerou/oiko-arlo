@@ -123,7 +123,8 @@ func TestDescribe(t *testing.T) {
 	}
 
 	cam := describe(arlo.Device{ID: "CAM1", Type: "camera"})
-	if len(cam.Functions) != 1 || cam.Functions[0].Key != "occupancy" || cam.Functions[0].Capabilities[0].Type != bridge.Binary {
+	if len(cam.Functions) != 2 || cam.Functions[0].Key != "occupancy" || cam.Functions[0].Capabilities[0].Type != bridge.Binary ||
+		cam.Functions[1].Key != "camera" || cam.Functions[1].Kind != "camera" || cam.Functions[1].Capabilities != nil {
 		t.Errorf("camera functions: %+v", cam.Functions)
 	}
 	if len(cam.Capabilities) != 1 || cam.Capabilities[0].Key != "battery" || cam.Capabilities[0].Category != bridge.Diagnostic {

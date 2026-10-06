@@ -1,6 +1,7 @@
 // Package oikoarlo is the arlo type of Bridge of Oiko: it connects Oiko to
 // Arlo's cloud through go-arlo (Oiko's ADR 0010). Each base station carries
-// its location's mode, each camera its motion, battery and connection.
+// its location's mode, each camera its motion, battery and connection, and
+// its Picture and Live view (bridge.Cameras).
 //
 // An Oiko built with this module imports it for its side effect, which
 // registers the type:
@@ -12,7 +13,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,11 +44,19 @@ type Config struct {
 
 // Bridge is Oiko's Arlo account.
 type Bridge struct {
-	client *arlo.Client
+	client client
 	log    *slog.Logger
 	// Only Run's goroutine touches these.
 	port  bridge.Port
 	bases []string // Native Addresses of the base stations: they carry the mode
+}
+
+// client is the part of go-arlo's Client the Bridge uses.
+type client interface {
+	Run(ctx context.Context, handle func(arlo.Event)) error
+	SetMode(ctx context.Context, mode arlo.Mode) error
+	LastImages(ctx context.Context, cameraID string) (arlo.LastImages, error)
+	Stream(ctx context.Context, cameraID string) (string, error)
 }
 
 // open reads the passwords and returns a Bridge keeping its session in the
@@ -99,6 +111,91 @@ func (b *Bridge) Run(ctx context.Context, p bridge.Port) {
 func (b *Bridge) Send(ctx context.Context, address, function string, values map[string]any, transition time.Duration) error {
 	mode, _ := values["mode"].(string)
 	return b.client.SetMode(ctx, arlo.Mode(mode))
+}
+
+var _ bridge.Cameras = (*Bridge)(nil)
+
+// camera is the key and kind of each camera's Function.
+const camera = "camera"
+
+// maxPicture bounds the body of a picture's GET.
+const maxPicture = 8 << 20
+
+// Picture returns the more recent of a camera's two latest pictures, its
+// recording thumbnail and its full-frame snapshot, as their Last-Modified
+// dates them. go-arlo keeps their URLs in memory: the camera never wakes.
+// The URLs are presigned, so they never appear in an error, which Oiko logs.
+func (b *Bridge) Picture(ctx context.Context, address, function string) (bridge.Picture, error) {
+	if function != camera {
+		return bridge.Picture{}, fmt.Errorf("arlo: no camera Function %q", function)
+	}
+	// go-arlo waits for Run's connection, which may sit in a long backoff.
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	li, err := b.client.LastImages(ctx, address)
+	if err != nil {
+		return bridge.Picture{}, fmt.Errorf("arlo: %w", err)
+	}
+	image, imageErr := fetch(ctx, "image", li.Image)
+	snapshot, snapshotErr := fetch(ctx, "snapshot", li.Snapshot)
+	switch {
+	case imageErr != nil && snapshotErr != nil:
+		return bridge.Picture{}, fmt.Errorf("arlo: %s: %w", address, errors.Join(imageErr, snapshotErr))
+	case imageErr != nil || snapshot.Taken.After(image.Taken):
+		return snapshot, nil
+	}
+	return image, nil
+}
+
+// fetch GETs the presigned JPEG at u; its errors leave u out.
+func fetch(ctx context.Context, name, u string) (bridge.Picture, error) {
+	if u == "" {
+		return bridge.Picture{}, fmt.Errorf("%s: none", name)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return bridge.Picture{}, fmt.Errorf("%s: invalid URL", name)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if ue := (*url.Error)(nil); errors.As(err, &ue) {
+		err = ue.Err // url.Error quotes the URL
+	}
+	if err != nil {
+		return bridge.Picture{}, fmt.Errorf("%s: %w", name, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return bridge.Picture{}, fmt.Errorf("%s: %s", name, resp.Status)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxPicture+1))
+	if err != nil {
+		return bridge.Picture{}, fmt.Errorf("%s: %w", name, err)
+	}
+	if len(data) > maxPicture {
+		return bridge.Picture{}, fmt.Errorf("%s: over %d bytes", name, maxPicture)
+	}
+	taken, _ := http.ParseTime(resp.Header.Get("Last-Modified"))
+	return bridge.Picture{Data: data, ContentType: "image/jpeg", Taken: taken}, nil
+}
+
+// Stream starts a camera's live stream, or joins the one running. Arlo's
+// RTSPS endpoint is an IP address its certificate does not name: rtspx://
+// tells Oiko not to verify it. The URL is a credential: never log it.
+func (b *Bridge) Stream(ctx context.Context, address, function string) (string, error) {
+	if function != camera {
+		return "", fmt.Errorf("arlo: no camera Function %q", function)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second) // as for Picture
+	defer cancel()
+	u, err := b.client.Stream(ctx, address)
+	if err != nil {
+		return "", fmt.Errorf("arlo: %w", err)
+	}
+	rest, ok := strings.CutPrefix(u, "rtsps://")
+	if !ok {
+		return "", errors.New("arlo: stream URL not rtsps")
+	}
+	return "rtspx://" + rest, nil
 }
 
 // handle translates one go-arlo event into Oiko's terms.
@@ -160,7 +257,7 @@ func describe(d arlo.Device) bridge.Device {
 	case "camera":
 		dev.Functions = []bridge.Function{{Key: "occupancy", Kind: "occupancy", Capabilities: []bridge.Capability{{
 			Key: "occupancy", Label: "Occupancy", Type: bridge.Binary, Access: observable, Category: bridge.Primary,
-		}}}}
+		}}}, {Key: camera, Kind: camera}}
 		dev.Capabilities = []bridge.Capability{{
 			Key: "battery", Label: "Battery", Type: bridge.Numeric, Unit: "%",
 			Min: &percent[0], Max: &percent[1], Access: observable, Category: bridge.Diagnostic,

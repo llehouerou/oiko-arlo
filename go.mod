@@ -3,8 +3,8 @@ module github.com/llehouerou/oiko-arlo
 go 1.27.1
 
 require (
-	github.com/llehouerou/go-arlo v0.4.0
-	github.com/llehouerou/oiko v0.5.0
+	github.com/llehouerou/go-arlo v0.4.2
+	github.com/llehouerou/oiko v0.7.0
 )
 
 require (
@@ -20,8 +20,9 @@ require (
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.61.0 // indirect
 	github.com/refraction-networking/utls v1.8.2 // indirect
-	golang.org/x/crypto v0.55.0 // indirect
-	golang.org/x/net v0.57.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.41.0 // indirect
+	github.com/stretchr/testify v1.12.1 // indirect
+	golang.org/x/crypto v0.57.0 // indirect
+	golang.org/x/net v0.58.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 )

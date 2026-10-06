@@ -71,13 +71,16 @@ func (l *fakeLibrary) list(from, to time.Time) []arlo.Recording {
 	}
 }
 
-func (l *fakeLibrary) home() *bridgetest.Home { return home(fakeClient{library: l.list}) }
+func (l *fakeLibrary) home(t *testing.T) *bridgetest.Home {
+	h, _ := home(t, fakeClient{library: l.list})
+	return h
+}
 
 // TestRecordings lists CAM1's videos in range, the newest first, from the
 // days around it, and clamps a range from 1970 to Arlo's retention.
 func TestRecordings(t *testing.T) {
 	l := newFakeLibrary(t)
-	h := l.home()
+	h := l.home(t)
 	rs, err := h.Recordings("CAM1", "camera", l.base, l.base.Add(2*time.Hour))
 	if err != nil {
 		t.Fatal(err)
@@ -121,7 +124,7 @@ func TestTrigger(t *testing.T) {
 // unlisted one, a refused one, and checks no error quotes a URL.
 func TestRecordingMedia(t *testing.T) {
 	l := newFakeLibrary(t)
-	h := l.home()
+	h := l.home(t)
 	rs, err := h.Recordings("CAM1", "camera", l.base, l.base)
 	if err != nil || len(rs) != 1 {
 		t.Fatalf("recordings: %+v, %v", rs, err)
@@ -161,7 +164,7 @@ func TestRecordingMedia(t *testing.T) {
 
 	// Not listed yet: its day is.
 	other := recordingID(arlo.Recording{Created: l.base.Add(time.Hour)})
-	resp, err := l.home().RecordingMedia("CAM1", "camera", other, bridge.Video, nil)
+	resp, err := l.home(t).RecordingMedia("CAM1", "camera", other, bridge.Video, nil)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		t.Errorf("unlisted video: %v", err)
 	} else {
@@ -193,7 +196,7 @@ func TestRecordingMediaStale(t *testing.T) {
 		r := video("CAM1", time.Now().Add(-time.Hour))
 		r.URL = "" // never fetched: not found once looked up
 		l := &lagging{recs: []arlo.Recording{r}}
-		h := home(fakeClient{library: l.list})
+		h, _ := home(t, fakeClient{library: l.list})
 		rs, err := h.Recordings("CAM1", "camera", r.Created, r.Created)
 		if err != nil || len(rs) != 1 {
 			t.Fatalf("recordings: %+v, %v", rs, err)
@@ -218,8 +221,8 @@ func TestRecordingMediaStale(t *testing.T) {
 func TestNoticeExpires(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		start := time.Now().Add(-30 * time.Second)
-		b, h := newHome(fakeClient{library: (&lagging{}).list})
-		b.handle(arlo.RecordingAdded{Recording: video("CAM1", start)})
+		h, emit := home(t, fakeClient{library: (&lagging{}).list})
+		emit(arlo.RecordingAdded{Recording: video("CAM1", start)})
 		for _, c := range []struct {
 			after time.Duration
 			want  int

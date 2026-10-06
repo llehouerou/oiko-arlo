@@ -61,6 +61,11 @@ type client interface {
 	SetMode(ctx context.Context, mode arlo.Mode) error
 	LastImages(ctx context.Context, cameraID string) (arlo.LastImages, error)
 	Stream(ctx context.Context, cameraID string) (string, error)
+	Library(ctx context.Context, from, to time.Time) ([]arlo.Recording, error)
+}
+
+func newBridge(c client, log *slog.Logger) *Bridge {
+	return &Bridge{client: c, lib: newLibrary(c.Library), log: log}
 }
 
 // open reads the passwords and returns a Bridge keeping its session in the
@@ -81,15 +86,14 @@ func open(env bridge.Env) (bridge.Bridge, error) {
 	if err != nil {
 		return nil, err
 	}
-	ac := arlo.New(arlo.Config{
+	return newBridge(arlo.New(arlo.Config{
 		Email:       c.Email,
 		Password:    password,
 		SessionPath: filepath.Join(env.DataDir, "session.json"),
 		Code:        arlo.IMAPCode(c.IMAPServer, c.IMAPUser, imapPassword),
 		DumpDir:     c.DumpDir,
 		Log:         env.Log,
-	})
-	return &Bridge{client: ac, lib: newLibrary(ac.Library), log: env.Log}, nil
+	}), env.Log), nil
 }
 
 func readSecret(path string) (string, error) {
@@ -118,6 +122,8 @@ func (b *Bridge) Send(ctx context.Context, address, function string, values map[
 	return b.client.SetMode(ctx, arlo.Mode(mode))
 }
 
+// Oiko asks the camera methods (bridge.Cameras, bridge.Recordings) for the
+// camera Function of a Device only: they never check it.
 var _ bridge.Cameras = (*Bridge)(nil)
 
 // camera is the key and kind of each camera's Function.
@@ -130,10 +136,7 @@ const maxPicture = 8 << 20
 // recording thumbnail and its full-frame snapshot, as their Last-Modified
 // dates them. go-arlo keeps their URLs in memory: the camera never wakes.
 // The URLs are presigned, so they never appear in an error, which Oiko logs.
-func (b *Bridge) Picture(ctx context.Context, address, function string) (bridge.Picture, error) {
-	if function != camera {
-		return bridge.Picture{}, fmt.Errorf("arlo: no camera Function %q", function)
-	}
+func (b *Bridge) Picture(ctx context.Context, address, _ string) (bridge.Picture, error) {
 	// go-arlo waits for Run's connection, which may sit in a long backoff.
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -205,10 +208,7 @@ func get(ctx context.Context, u string, header http.Header) (*http.Response, err
 // Stream starts a camera's live stream, or joins the one running. Arlo's
 // RTSPS endpoint is an IP address its certificate does not name: rtspx://
 // tells Oiko not to verify it. The URL is a credential: never log it.
-func (b *Bridge) Stream(ctx context.Context, address, function string) (string, error) {
-	if function != camera {
-		return "", fmt.Errorf("arlo: no camera Function %q", function)
-	}
+func (b *Bridge) Stream(ctx context.Context, address, _ string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second) // as for Picture
 	defer cancel()
 	u, err := b.client.Stream(ctx, address)

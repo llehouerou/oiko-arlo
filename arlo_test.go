@@ -13,15 +13,13 @@ import (
 	"github.com/llehouerou/oiko/bridge/bridgetest"
 )
 
-// TestHandleFeedsPort replays what go-arlo reports on connecting, as observed
+// TestRunFeedsPort replays what go-arlo reports on connecting, as observed
 // on a real account, then a motion, a custom mode and the stream going down.
-func TestHandleFeedsPort(t *testing.T) {
-	b := &Bridge{}
-	h := bridgetest.New(b)
-	b.port = h.Port()
+func TestRunFeedsPort(t *testing.T) {
+	h, emit := run(t, fakeClient{})
 	up, down, battery := true, false, 31
 
-	for _, e := range []arlo.Event{
+	emit(
 		arlo.Devices{
 			{ID: "BASE", Name: "House", Model: "VMB4000", Type: "basestation"},
 			{ID: "CAM1", Name: "Gate", Model: "VMC4030P", Type: "camera", BaseID: "BASE"},
@@ -29,13 +27,11 @@ func TestHandleFeedsPort(t *testing.T) {
 		},
 		arlo.Connection{Up: true},
 		arlo.DeviceState{ID: "BASE", Connected: &up},
-	} {
-		b.handle(e)
-	}
+	)
 	if h.Replayed() {
 		t.Fatal("replayed before the mode is known")
 	}
-	b.handle(arlo.ModeChanged{LocationID: "loc", LocationName: "Home", Mode: arlo.Standby})
+	emit(arlo.ModeChanged{LocationID: "loc", LocationName: "Home", Mode: arlo.Standby})
 	if !h.Replayed() {
 		t.Fatal("not replayed once the mode is known")
 	}
@@ -43,15 +39,13 @@ func TestHandleFeedsPort(t *testing.T) {
 		t.Errorf("mode = %v, want standby", got.Data)
 	}
 
-	for _, e := range []arlo.Event{
+	emit(
 		arlo.DeviceState{ID: "CAM1", Connected: &up, Battery: &battery},
 		arlo.DeviceState{ID: "CAM2", Connected: &down},
 		arlo.Motion{ID: "CAM1", Active: true},
 		arlo.Motion{ID: "CAM1", Active: true}, // the base sends each packet twice
 		arlo.ModeChanged{Mode: "custom"},
-	} {
-		b.handle(e)
-	}
+	)
 
 	var names []string
 	for _, d := range h.Devices() {
@@ -78,12 +72,12 @@ func TestHandleFeedsPort(t *testing.T) {
 		}
 	}
 
-	// Refused by Oiko before reaching Send, which has no client here.
+	// Refused by Oiko before reaching Send.
 	if err := h.Command("BASE", "arming", map[string]any{"mode": "custom"}); !errors.Is(err, bridgetest.ErrRefused) {
 		t.Errorf("custom mode commanded: %v, want refused", err)
 	}
 
-	b.handle(arlo.Connection{Up: false})
+	emit(arlo.Connection{Up: false})
 	if h.Online() {
 		t.Error("online after the stream went down")
 	}

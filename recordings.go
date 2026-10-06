@@ -21,10 +21,7 @@ const retention = 31 * 24 * time.Hour
 
 // Recordings lists a camera's videos, from Arlo's Library. The ID of a
 // recording is its start in Unix milliseconds.
-func (b *Bridge) Recordings(ctx context.Context, address, function string, from, to time.Time) ([]bridge.Recording, error) {
-	if function != camera {
-		return nil, fmt.Errorf("arlo: no camera Function %q: %w", function, bridge.ErrNotFound)
-	}
+func (b *Bridge) Recordings(ctx context.Context, address, _ string, from, to time.Time) ([]bridge.Recording, error) {
 	if oldest := time.Now().Add(-retention); from.Before(oldest) {
 		from = oldest // Oiko's "All" asks from 1970
 	}
@@ -46,9 +43,9 @@ func (b *Bridge) Recordings(ctx context.Context, address, function string, from,
 }
 
 // RecordingMedia GETs a recording's video or thumbnail with header.
-func (b *Bridge) RecordingMedia(ctx context.Context, address, function, id string, part bridge.RecordingPart, header http.Header) (*http.Response, error) {
+func (b *Bridge) RecordingMedia(ctx context.Context, address, _, id string, part bridge.RecordingPart, header http.Header) (*http.Response, error) {
 	ms, err := strconv.ParseInt(id, 10, 64)
-	if function != camera || err != nil {
+	if err != nil {
 		return nil, fmt.Errorf("arlo: recording %s of %s: %w", id, address, bridge.ErrNotFound)
 	}
 	resp, err := b.lib.media(ctx, address, time.UnixMilli(ms), part, header)

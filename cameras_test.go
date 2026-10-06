@@ -14,19 +14,33 @@ import (
 	"github.com/llehouerou/oiko/bridge/bridgetest"
 )
 
-// fakeClient answers the cameras' calls from memory.
+// fakeClient answers the Bridge's calls from memory, and hands Run's handler
+// the events run's emit sends.
 type fakeClient struct {
 	images  map[string]arlo.LastImages
 	stream  string
 	library func(from, to time.Time) []arlo.Recording
+	events  chan arlo.Event
+	handled chan struct{}
 }
 
 func (f fakeClient) Library(_ context.Context, from, to time.Time) ([]arlo.Recording, error) {
 	return f.library(from, to), nil
 }
 
-func (fakeClient) Run(context.Context, func(arlo.Event)) error { return nil }
-func (fakeClient) SetMode(context.Context, arlo.Mode) error    { return nil }
+func (f fakeClient) Run(ctx context.Context, handle func(arlo.Event)) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case e := <-f.events:
+			handle(e)
+			f.handled <- struct{}{}
+		}
+	}
+}
+
+func (fakeClient) SetMode(context.Context, arlo.Mode) error { return nil }
 
 func (f fakeClient) LastImages(_ context.Context, id string) (arlo.LastImages, error) {
 	li, ok := f.images[id]
@@ -48,27 +62,44 @@ const secret = "X-Amz-Signature=s3cr3t"
 // cameras is a home with the Bridge online, its base BASE and camera CAM1,
 // whose pictures are images.
 func cameras(t *testing.T, images arlo.LastImages) *bridgetest.Home {
-	return home(fakeClient{images: map[string]arlo.LastImages{"CAM1": images}})
+	h, _ := home(t, fakeClient{images: map[string]arlo.LastImages{"CAM1": images}})
+	return h
 }
 
 // home is a home with the Bridge on c online, its base BASE and cameras
 // CAM1 and CAM2.
-func home(c fakeClient) *bridgetest.Home {
-	_, h := newHome(c)
-	return h
-}
-
-func newHome(c fakeClient) (*Bridge, *bridgetest.Home) {
-	b := &Bridge{client: c, lib: newLibrary(c.Library), log: slog.New(slog.DiscardHandler), ctx: context.Background()}
-	h := bridgetest.New(b)
-	b.port = h.Port()
-	b.handle(arlo.Devices{
+func home(t *testing.T, c fakeClient) (*bridgetest.Home, func(...arlo.Event)) {
+	h, emit := run(t, c)
+	emit(arlo.Devices{
 		{ID: "BASE", Name: "House", Type: "basestation"},
 		{ID: "CAM1", Name: "Gate", Type: "camera", BaseID: "BASE"},
 		{ID: "CAM2", Name: "Veranda", Type: "camera", BaseID: "BASE"},
+	}, arlo.Connection{Up: true})
+	return h, emit
+}
+
+// run runs a Bridge on c as Oiko does, until the test ends. emit hands it
+// events as go-arlo does, each one handled once emit returns.
+func run(t *testing.T, c fakeClient) (h *bridgetest.Home, emit func(...arlo.Event)) {
+	c.events, c.handled = make(chan arlo.Event), make(chan struct{})
+	b := newBridge(c, slog.New(slog.DiscardHandler))
+	h = bridgetest.New(b)
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() {
+		b.Run(ctx, h.Port())
+		close(stopped)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-stopped
 	})
-	b.handle(arlo.Connection{Up: true})
-	return b, h
+	return h, func(es ...arlo.Event) {
+		for _, e := range es {
+			c.events <- e
+			<-c.handled
+		}
+	}
 }
 
 // TestPicture serves an older thumbnail and a newer snapshot, and checks the
@@ -125,23 +156,23 @@ func TestPicture(t *testing.T) {
 	}
 }
 
-// TestStream checks the scheme Oiko gets, and the refusals of what is no
-// camera.
+// TestStream checks the scheme Oiko gets.
 func TestStream(t *testing.T) {
-	b := &Bridge{client: fakeClient{images: map[string]arlo.LastImages{"CAM1": {}}, stream: "rtsps://192.0.2.1:443/stream?" + secret}}
+	b := newBridge(fakeClient{images: map[string]arlo.LastImages{"CAM1": {}}, stream: "rtsps://192.0.2.1:443/stream?" + secret}, slog.New(slog.DiscardHandler))
 	u, err := b.Stream(context.Background(), "CAM1", "camera")
 	if want := "rtspx://192.0.2.1:443/stream?" + secret; err != nil || u != want {
 		t.Errorf("stream = %q, %v; want %q", u, err, want)
 	}
-	for _, c := range [][2]string{{"BASE", "camera"}, {"CAM9", "camera"}, {"CAM1", "occupancy"}} {
-		if _, err := b.Stream(context.Background(), c[0], c[1]); err == nil {
-			t.Errorf("%s/%s: no error", c[0], c[1])
-		}
-		if _, err := b.Picture(context.Background(), c[0], c[1]); err == nil {
-			t.Errorf("%s/%s: picture, no error", c[0], c[1])
-		}
-	}
-	if _, err := cameras(t, arlo.LastImages{}).Picture("BASE", "arming"); !errors.Is(err, bridgetest.ErrRefused) {
+}
+
+// TestNoCameraRefused: Oiko refuses what is no camera Function before the
+// Bridge, which never checks it.
+func TestNoCameraRefused(t *testing.T) {
+	h := cameras(t, arlo.LastImages{})
+	if _, err := h.Picture("BASE", "arming"); !errors.Is(err, bridgetest.ErrRefused) {
 		t.Errorf("picture of the base's arming: %v, want refused", err)
+	}
+	if _, err := h.Recordings("CAM1", "occupancy", time.Now(), time.Now()); !errors.Is(err, bridgetest.ErrRefused) {
+		t.Errorf("recordings of a camera's occupancy: %v, want refused", err)
 	}
 }

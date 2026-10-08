@@ -1,6 +1,6 @@
 # oiko-arlo
 
-The `arlo` type of Bridge of Oiko. Oiko's own `CONTEXT.md` defines the vocabulary this module speaks; this file holds only the Arlo-side terms it adds.
+The `arlo` type of Bridge of Oiko. Oiko's own `GLOSSARY.md` defines the vocabulary this module speaks; this file holds only the Arlo-side terms it adds.
 
 ## Language
 

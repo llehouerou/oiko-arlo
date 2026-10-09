@@ -4,7 +4,7 @@ go 1.27.1
 
 require (
 	github.com/llehouerou/go-arlo v0.6.2
-	github.com/llehouerou/oiko v0.9.2
+	github.com/llehouerou/oiko v0.10.1
 )
 
 require (

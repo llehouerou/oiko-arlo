@@ -5,7 +5,9 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"strings"
 	"testing"
+	"testing/synctest"
 
 	arlo "github.com/llehouerou/go-arlo"
 
@@ -16,117 +18,135 @@ import (
 // TestRunFeedsPort replays what go-arlo reports on connecting, as observed
 // on a real account, then a motion, a custom mode and the stream going down.
 func TestRunFeedsPort(t *testing.T) {
-	h, emit := run(t, fakeClient{})
-	up, down, battery := true, false, 31
+	synctest.Test(t, func(t *testing.T) {
+		h, emit := run(t, fakeClient{})
+		up, down, battery := true, false, 31
 
-	emit(
-		arlo.Devices{
-			{ID: "BASE", Name: "House", Model: "VMB4000", Type: "basestation"},
-			{ID: "CAM1", Name: "Gate", Model: "VMC4030P", Type: "camera", BaseID: "BASE"},
-			{ID: "CAM2", Name: "Veranda", Model: "VMC4030P", Type: "camera", BaseID: "BASE"},
-		},
-		arlo.Connection{Up: true},
-		arlo.DeviceState{ID: "BASE", Connected: &up},
-	)
-	if h.Replayed() {
-		t.Fatal("replayed before the mode is known")
-	}
-	emit(arlo.ModeChanged{LocationID: "loc", LocationName: "Home", Mode: arlo.Standby})
-	if !h.Replayed() {
-		t.Fatal("not replayed once the mode is known")
-	}
-	if got, _ := h.Value("BASE", "arming", "mode"); got.Data != "standby" {
-		t.Errorf("mode = %v, want standby", got.Data)
-	}
-
-	emit(
-		arlo.DeviceState{ID: "CAM1", Connected: &up, Battery: &battery},
-		arlo.DeviceState{ID: "CAM2", Connected: &down},
-		arlo.Motion{ID: "CAM1", Active: true},
-		arlo.Motion{ID: "CAM1", Active: true}, // the base sends each packet twice
-		arlo.ModeChanged{Mode: "custom"},
-	)
-
-	var names []string
-	for _, d := range h.Devices() {
-		names = append(names, d.NativeAddress+" "+d.Name+" "+d.Model+" "+d.Vendor)
-	}
-	if want := []string{"BASE House VMB4000 Arlo", "CAM1 Gate VMC4030P Arlo", "CAM2 Veranda VMC4030P Arlo"}; !slices.Equal(names, want) {
-		t.Errorf("devices = %q, want %q", names, want)
-	}
-	for _, c := range []struct {
-		addr, fn, capability string
-		want                 any
-	}{
-		{"BASE", "arming", "mode", "custom"}, // shown, though no option
-		{"CAM1", "", "battery", 31.0},
-		{"CAM1", "occupancy", "occupancy", true},
-	} {
-		if got, _ := h.Value(c.addr, c.fn, c.capability); got.Data != c.want {
-			t.Errorf("%s/%s/%s = %v, want %v", c.addr, c.fn, c.capability, got.Data, c.want)
+		emit(
+			arlo.Devices{
+				{ID: "BASE", Name: "House", Model: "VMB4000", Type: "basestation"},
+				{ID: "CAM1", Name: "Gate", Model: "VMC4030P", Type: "camera", BaseID: "BASE"},
+				{ID: "CAM2", Name: "Veranda", Model: "VMC4030P", Type: "camera", BaseID: "BASE"},
+			},
+			arlo.Connection{Up: true},
+			arlo.DeviceState{ID: "BASE", Connected: &up},
+		)
+		if h.Replayed() {
+			t.Fatal("replayed before the mode is known")
 		}
-	}
-	for addr, want := range map[string]bridge.Availability{"BASE": bridge.Online, "CAM1": bridge.Online, "CAM2": bridge.Offline} {
-		if got := h.Availability(addr); got != want {
-			t.Errorf("%s: %s, want %s", addr, got, want)
+		emit(arlo.ModeChanged{LocationID: "loc", LocationName: "Home", Mode: arlo.Standby})
+		if !h.Replayed() {
+			t.Fatal("not replayed once the mode is known")
 		}
-	}
+		if got, _ := h.Value("BASE", "arming", "mode"); got.Data != "standby" {
+			t.Errorf("mode = %v, want standby", got.Data)
+		}
 
-	// Refused by Oiko before reaching Send.
-	if err := h.Command("BASE", "arming", map[string]any{"mode": "custom"}); !errors.Is(err, bridgetest.ErrRefused) {
-		t.Errorf("custom mode commanded: %v, want refused", err)
-	}
+		emit(
+			arlo.DeviceState{ID: "CAM1", Connected: &up, Battery: &battery},
+			arlo.DeviceState{ID: "CAM2", Connected: &down},
+			arlo.Motion{ID: "CAM1", Active: true},
+			arlo.Motion{ID: "CAM1", Active: true}, // the base sends each packet twice
+			arlo.ModeChanged{Mode: "custom"},
+		)
 
-	emit(arlo.Connection{Up: false})
-	if h.Online() {
-		t.Error("online after the stream went down")
-	}
-	if got := h.Availability("BASE"); got != bridge.Unknown {
-		t.Errorf("BASE offline bridge: %s, want unknown", got)
-	}
+		var names []string
+		for _, d := range h.Devices() {
+			names = append(names, d.NativeAddress+" "+d.Name+" "+d.Model+" "+d.Vendor)
+		}
+		if want := []string{"BASE House VMB4000 Arlo", "CAM1 Gate VMC4030P Arlo", "CAM2 Veranda VMC4030P Arlo"}; !slices.Equal(names, want) {
+			t.Errorf("devices = %q, want %q", names, want)
+		}
+		for _, c := range []struct {
+			addr, fn, capability string
+			want                 any
+		}{
+			{"BASE", "arming", "mode", "custom"}, // shown, though no option
+			{"CAM1", "", "battery", 31.0},
+			{"CAM1", "occupancy", "occupancy", true},
+		} {
+			if got, _ := h.Value(c.addr, c.fn, c.capability); got.Data != c.want {
+				t.Errorf("%s/%s/%s = %v, want %v", c.addr, c.fn, c.capability, got.Data, c.want)
+			}
+		}
+		for addr, want := range map[string]bridge.Availability{"BASE": bridge.Online, "CAM1": bridge.Online, "CAM2": bridge.Offline} {
+			if got := h.Availability(addr); got != want {
+				t.Errorf("%s: %s, want %s", addr, got, want)
+			}
+		}
+
+		// Refused by Oiko before reaching Send.
+		if err := h.Command("BASE", "arming", map[string]any{"mode": "custom"}); !errors.Is(err, bridgetest.ErrRefused) {
+			t.Errorf("custom mode commanded: %v, want refused", err)
+		}
+
+		emit(arlo.Connection{Up: false})
+		if h.Online() {
+			t.Error("online after the stream went down")
+		}
+		if got := h.Availability("BASE"); got != bridge.Unknown {
+			t.Errorf("BASE offline bridge: %s, want unknown", got)
+		}
+	})
 }
 
-// TestOpen opens a valid section, and refuses a misspelt key.
+// TestOpen creates the Bridge as Oiko does, from its section of the
+// configuration, which it refuses unless it can work with it.
 func TestOpen(t *testing.T) {
 	secret := t.TempDir() + "/secret"
 	if err := os.WriteFile(secret, []byte("pw\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	valid := `{"email": "oiko@example.com", "passwordFile": "` + secret + `", "imapServer": "imap.example.com:993", "imapUser": "oiko@example.com", "imapPasswordFile": "` + secret + `"`
-	if _, err := open(bridgetest.Env(t, "arlo", valid+`}`)); err != nil {
-		t.Errorf("valid section: %v", err)
+	section := func(passwordFile, more string) string {
+		return `{"email": "oiko@example.com", "passwordFile": "` + passwordFile + `", "imapServer": "imap.example.com:993", "imapUser": "oiko@example.com", "imapPasswordFile": "` + secret + `"` + more + `}`
 	}
-	if _, err := open(bridgetest.Env(t, "arlo", valid+`, "dumpDirectory": "/tmp"}`)); err == nil {
-		t.Error("misspelt key accepted")
+	for _, c := range []struct {
+		name, config, err string // err: in the error; "" for none
+	}{
+		{"valid", section(secret, ""), ""},
+		{"no email", `{"passwordFile": "` + secret + `"}`, "email"},
+		{"no password file", section(secret+".missing", ""), "secret.missing"},
+		{"misspelt key", section(secret, `, "dumpDirectory": "/tmp"`), `"dumpDirectory"`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := open(bridgetest.Env(t, "arlo", c.config))
+			if c.err == "" && err != nil || c.err != "" && (err == nil || !strings.Contains(err.Error(), c.err)) {
+				t.Errorf("err = %v, want one about %q", err, c.err)
+			}
+		})
 	}
 }
 
-// TestDescribe checks the Capabilities a base station and a camera get; the
-// arming mode offers only the modes that can be commanded.
+// TestDescribe checks the Capabilities a base station and a camera get, as
+// Oiko holds them; the arming mode offers only the modes that can be
+// commanded.
 func TestDescribe(t *testing.T) {
-	base := describe(arlo.Device{ID: "BASE", Type: "basestation"})
-	if len(base.Functions) != 1 || base.Functions[0].Key != "arming" || len(base.Functions[0].Capabilities) != 1 {
-		t.Fatalf("base: %+v", base)
-	}
-	mode := base.Functions[0].Capabilities[0]
-	if mode.Key != "mode" || mode.Type != bridge.Enum || !mode.Access.Settable {
-		t.Errorf("mode: %+v", mode)
-	}
-	if want := []string{"standby", "armHome", "armAway"}; !slices.Equal(mode.Options, want) {
-		t.Errorf("mode options = %q, want %q (never custom)", mode.Options, want)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		h, _ := home(t, fakeClient{})
+		devices := h.Devices()
+		base, cam := devices[0], devices[1]
+		if len(base.Functions) != 1 || base.Functions[0].Key != "arming" || len(base.Functions[0].Capabilities) != 1 {
+			t.Fatalf("base: %+v", base)
+		}
+		mode := base.Functions[0].Capabilities[0]
+		if mode.Key != "mode" || mode.Type != bridge.Enum || !mode.Access.Settable {
+			t.Errorf("mode: %+v", mode)
+		}
+		if want := []string{"standby", "armHome", "armAway"}; !slices.Equal(mode.Options, want) {
+			t.Errorf("mode options = %q, want %q (never custom)", mode.Options, want)
+		}
 
-	cam := describe(arlo.Device{ID: "CAM1", Type: "camera"})
-	if len(cam.Functions) != 2 || cam.Functions[0].Key != "occupancy" || cam.Functions[0].Capabilities[0].Type != bridge.Binary ||
-		cam.Functions[1].Key != "camera" || cam.Functions[1].Kind != "camera" || len(cam.Functions[1].Capabilities) != 1 {
-		t.Fatalf("camera functions: %+v", cam.Functions)
-	}
-	if rec := cam.Functions[1].Capabilities[0]; rec.Key != bridge.RecordingEvent || rec.Type != bridge.Enum || !rec.Stateless || !slices.Contains(rec.Options, "other") {
-		t.Errorf("recording: %+v", rec)
-	}
-	if len(cam.Capabilities) != 1 || cam.Capabilities[0].Key != "battery" || cam.Capabilities[0].Category != bridge.Diagnostic {
-		t.Errorf("camera capabilities: %+v", cam.Capabilities)
-	}
+		if len(cam.Functions) != 2 || cam.Functions[0].Key != "occupancy" || cam.Functions[0].Capabilities[0].Type != bridge.Binary ||
+			cam.Functions[1].Key != "camera" || cam.Functions[1].Kind != "camera" || len(cam.Functions[1].Capabilities) != 1 {
+			t.Fatalf("camera functions: %+v", cam.Functions)
+		}
+		if rec := cam.Functions[1].Capabilities[0]; rec.Key != bridge.RecordingEvent || rec.Type != bridge.Enum || !rec.Stateless || !slices.Contains(rec.Options, "other") {
+			t.Errorf("recording: %+v", rec)
+		}
+		if len(cam.Capabilities) != 1 || cam.Capabilities[0].Key != "battery" || cam.Capabilities[0].Category != bridge.Diagnostic {
+			t.Errorf("camera capabilities: %+v", cam.Capabilities)
+		}
+	})
 }
 
 // TestManifest checks the catalogue's manifest: the types registered, and an

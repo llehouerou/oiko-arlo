@@ -44,14 +44,15 @@ type keptRecording struct {
 // side.
 type library struct {
 	list func(ctx context.Context, from, to time.Time) ([]arlo.Recording, error)
+	s3   *http.Client
 
 	mu        sync.Mutex
 	kept      map[recordingKey]keptRecording
 	announced map[recordingKey]time.Time // by the recording's start
 }
 
-func newLibrary(list func(ctx context.Context, from, to time.Time) ([]arlo.Recording, error)) *library {
-	return &library{list: list, kept: map[recordingKey]keptRecording{}, announced: map[recordingKey]time.Time{}}
+func newLibrary(list func(ctx context.Context, from, to time.Time) ([]arlo.Recording, error), s3 *http.Client) *library {
+	return &library{list: list, s3: s3, kept: map[recordingKey]keptRecording{}, announced: map[recordingKey]time.Time{}}
 }
 
 // videos returns every camera's videos started within [from, to]: a fresh
@@ -107,7 +108,7 @@ func (l *library) media(ctx context.Context, camera string, start time.Time, par
 		if !ok || u == "" {
 			return nil, bridge.ErrNotFound
 		}
-		resp, err := get(ctx, u, header)
+		resp, err := get(ctx, l.s3, u, header)
 		if err != nil {
 			return nil, err
 		}

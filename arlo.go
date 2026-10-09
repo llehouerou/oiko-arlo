@@ -46,6 +46,7 @@ type Config struct {
 // Bridge is Oiko's Arlo account.
 type Bridge struct {
 	client client
+	s3     *http.Client // GETs Arlo's presigned URLs
 	lib    *library
 	log    *slog.Logger
 	// Only Run's goroutine touches these.
@@ -65,7 +66,13 @@ type client interface {
 }
 
 func newBridge(c client, log *slog.Logger) *Bridge {
-	return &Bridge{client: c, lib: newLibrary(c.Library), log: log}
+	// It bounds the wait for the headers but not the body, which may be a
+	// video read for as long as it plays, and leaves the body as S3 sends it.
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.ResponseHeaderTimeout = 30 * time.Second
+	t.DisableCompression = true
+	s3 := &http.Client{Transport: t}
+	return &Bridge{client: c, s3: s3, lib: newLibrary(c.Library, s3), log: log}
 }
 
 // open reads the passwords and returns a Bridge keeping its session in the
@@ -144,8 +151,8 @@ func (b *Bridge) Picture(ctx context.Context, address, _ string) (bridge.Picture
 	if err != nil {
 		return bridge.Picture{}, fmt.Errorf("arlo: %w", err)
 	}
-	image, imageErr := fetch(ctx, "image", li.Image)
-	snapshot, snapshotErr := fetch(ctx, "snapshot", li.Snapshot)
+	image, imageErr := fetch(ctx, b.s3, "image", li.Image)
+	snapshot, snapshotErr := fetch(ctx, b.s3, "snapshot", li.Snapshot)
 	switch {
 	case imageErr != nil && snapshotErr != nil:
 		return bridge.Picture{}, fmt.Errorf("arlo: %s: %w", address, errors.Join(imageErr, snapshotErr))
@@ -156,11 +163,11 @@ func (b *Bridge) Picture(ctx context.Context, address, _ string) (bridge.Picture
 }
 
 // fetch GETs the presigned JPEG at u; its errors leave u out.
-func fetch(ctx context.Context, name, u string) (bridge.Picture, error) {
+func fetch(ctx context.Context, s3 *http.Client, name, u string) (bridge.Picture, error) {
 	if u == "" {
 		return bridge.Picture{}, fmt.Errorf("%s: none", name)
 	}
-	resp, err := get(ctx, u, nil)
+	resp, err := get(ctx, s3, u, nil)
 	if err != nil {
 		return bridge.Picture{}, fmt.Errorf("%s: %w", name, err)
 	}
@@ -179,18 +186,8 @@ func fetch(ctx context.Context, name, u string) (bridge.Picture, error) {
 	return bridge.Picture{Data: data, ContentType: "image/jpeg", Taken: taken}, nil
 }
 
-// presigned GETs Arlo's presigned URLs. It bounds the wait for the headers
-// but not the body, which may be a video read for as long as it plays, and
-// leaves the body as S3 sends it.
-var presigned = func() *http.Client {
-	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.ResponseHeaderTimeout = 30 * time.Second
-	t.DisableCompression = true
-	return &http.Client{Transport: t}
-}()
-
 // get GETs the presigned URL u with header; its errors leave u out.
-func get(ctx context.Context, u string, header http.Header) (*http.Response, error) {
+func get(ctx context.Context, s3 *http.Client, u string, header http.Header) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, errors.New("invalid URL")
@@ -198,7 +195,7 @@ func get(ctx context.Context, u string, header http.Header) (*http.Response, err
 	if header != nil {
 		req.Header = header.Clone()
 	}
-	resp, err := presigned.Do(req)
+	resp, err := s3.Do(req)
 	if ue := (*url.Error)(nil); errors.As(err, &ue) {
 		err = ue.Err // url.Error quotes the URL
 	}

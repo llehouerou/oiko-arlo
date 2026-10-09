@@ -1,8 +1,11 @@
 # oiko-arlo
 
-Arlo cameras for [Oiko](https://github.com/llehouerou/oiko): the `arlo` type of Bridge,
-added to an Oiko build like any other (Oiko's ADR 0017). It follows Arlo's cloud through
-[go-arlo](https://github.com/llehouerou/go-arlo) (Oiko's ADR 0010); Arlo has no local API.
+Arlo cameras for [Oiko](https://github.com/llehouerou/oiko): the `arlo` type of Bridge, added
+to an Oiko build like any other. It follows Arlo's cloud through
+[go-arlo](https://github.com/llehouerou/go-arlo)
+([ADR 0010](https://github.com/llehouerou/oiko/blob/main/docs/adr/0010-arlo-through-go-arlo.md));
+Arlo has no local API. It is the reference type for cameras and Recordings in Oiko's guide,
+[Write a type of Bridge](https://github.com/llehouerou/oiko/blob/main/docs/write-a-bridge.md#cameras-and-recordings).
 
 What it follows:
 
@@ -17,14 +20,30 @@ What it follows:
   `vehicle`, `animal`, `package`, `motion`, `sound`, or `other`): an Automation can
   send its video on. A reconnection announces the recordings of the last 15 minutes it
   missed, nothing older;
-- each base station: whether it is connected, and the location's mode, as the `mode`
-  Capability of an `arming` Function. Oiko can set it to `standby`, `armHome` or
-  `armAway`; a custom mode the owner activates in Arlo's app is shown as `custom`, and
+- each base station: whether it is connected (its Availability), and the location's mode,
+  as the `mode` Capability of an `arming` Function. Oiko can set it to `standby`, `armHome`
+  or `armAway`; a custom mode the owner activates in Arlo's app is shown as `custom`, and
   cannot be commanded.
+
+The Bridge is online while Arlo's event stream is connected. Its Replay ends once the
+location's mode is known, the cameras' state following it within a second or two.
+
+## Arlo setup
+
+- **A dedicated Arlo account.** In Arlo's app, the owner of the cameras grants an account of
+  its own to Oiko (Settings › Grant Access), never the owner's own account. The account must
+  see exactly one Arlo location holding its base stations; otherwise the Bridge never
+  connects.
+- **Two-factor codes by email.** The account receives its two-factor codes by email, in a
+  mailbox the Bridge reads over IMAP (TLS), so that logging in needs nobody. Arlo asks for a
+  code on the first login, and when it takes the session for an untrusted browser (error
+  9261); the Bridge reads it in about 10 seconds.
 
 ## Configure
 
-The Bridge's section of Oiko's configuration, under `bridges`:
+The Bridge's section of Oiko's
+[configuration](https://github.com/llehouerou/oiko/blob/main/docs/configure.md#bridges),
+under `bridges`:
 
 ```json
 {"bridges": {"arlo": {
@@ -36,17 +55,14 @@ The Bridge's section of Oiko's configuration, under `bridges`:
 }}}
 ```
 
-- `email`, `passwordFile`: the Arlo account Oiko logs in as. Use a dedicated account the
-  owner of the cameras granted access to, never the owner's. The account must see exactly one
-  Arlo location holding its base stations; otherwise the Bridge never connects. Passwords
-  are read from files, so that they stay out of the configuration.
-- `imapServer` (`host:port`, TLS), `imapUser`, `imapPasswordFile`: the mailbox where
-  Arlo sends the account's two-factor codes, by email. The Bridge reads them over IMAP, so
-  that logging in needs nobody.
+- `email`, `passwordFile`: the dedicated Arlo account, and the file holding its password.
+- `imapServer` (`host:port`, TLS), `imapUser`, `imapPasswordFile`: the mailbox where Arlo
+  sends the account's two-factor codes, and the file holding its password.
 - `dumpDir` (optional), a debugging aid: a directory receiving one JSON file per HTTP
   response and MQTT message from Arlo, secrets redacted, never rotated.
 
-`email`, `imapServer` and `imapUser` are required; any other key stops Oiko from starting.
+Every key but `dumpDir` is required. Passwords are read from the files the `…File` keys name,
+so that they stay out of the configuration. Any other key stops Oiko from starting.
 
 ### The session file
 
@@ -63,7 +79,7 @@ in a loop only burns Arlo's rate limit.
 Build an Oiko with this type (Go 1.27 needed):
 
 ```sh
-go run github.com/llehouerou/oiko/cmd/oiko-build@v0.9.2 -with github.com/llehouerou/oiko-arlo@v0.7.1 -o oiko
+go run github.com/llehouerou/oiko/cmd/oiko-build@latest -with github.com/llehouerou/oiko-arlo@latest -o oiko
 ./oiko -version   # lists the arlo type, with its module and version
 ```
 
@@ -73,7 +89,7 @@ On NixOS, override Oiko's package with this module's version, and pass the secre
 
 ```nix
 services.oiko.package = oiko.packages.${system}.default.override {
-  bridges."github.com/llehouerou/oiko-arlo" = "v0.7.1";
+  bridges."github.com/llehouerou/oiko-arlo" = "<version>"; # its latest tag
   vendorHash = "sha256-…"; # the first nix build prints it
 };
 services.oiko.credentials = {
@@ -89,18 +105,30 @@ services.oiko.settings.bridges.arlo = {
 };
 ```
 
-See Oiko's README for building and deploying it.
+Its entry in the [catalogue](https://llehouerou.github.io/oiko-catalogue/#arlo) gives both,
+with the latest versions. Oiko's [Install](https://github.com/llehouerou/oiko/blob/main/docs/install.md)
+and [Configure](https://github.com/llehouerou/oiko/blob/main/docs/configure.md#add-a-type-of-bridge)
+pages say the rest.
 
 ## Versions
 
-Versions follow Oiko's (its ADR 0019): during v0, a patch release neither breaks nor adds
-anything, and a minor release may break the configuration, its notes listing what changed.
-Each version's `go.mod` names the Oiko it needs.
+Versions follow Oiko's
+([ADR 0019](https://github.com/llehouerou/oiko/blob/main/docs/adr/0019-release-and-compatibility-policy.md)):
+during v0, a patch release neither breaks nor adds anything, and a minor release may break
+the configuration, its notes listing what changed. Each version's `go.mod` names the
+minimum Oiko it needs.
 
 ## Develop
 
 ```sh
-direnv allow   # or `nix develop`: Go 1.27
 go test ./...
-go run github.com/llehouerou/oiko/cmd/oiko-build@v0.9.2 -with github.com/llehouerou/oiko-arlo=. -o oiko
+go run github.com/llehouerou/oiko/cmd/oiko-build@latest -with github.com/llehouerou/oiko-arlo=. -o oiko
 ```
+
+The tests run against a fake Arlo client and a fake S3 in memory, with no network and no real
+clock. `nix develop` gives Go 1.27. [CONTRIBUTING.md](CONTRIBUTING.md) says how to contribute,
+[SECURITY.md](SECURITY.md) how to report a vulnerability.
+
+## License
+
+Apache-2.0: see [LICENSE](LICENSE) and [NOTICE](NOTICE). go-arlo, which it depends on, is MIT.
